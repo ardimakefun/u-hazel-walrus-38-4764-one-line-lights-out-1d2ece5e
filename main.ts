@@ -11,9 +11,13 @@ const LINE =
 // characters, not only whitespace; an invalid entry takes no prize. Enforce
 // the cap here so a future edit to the line that breaks it fails loudly
 // at build time instead of silently shipping an invalid entry.
-if (LINE.length < 1 || LINE.length > 200 || LINE.trim().length === 0) {
+// Count characters as Unicode code points, not UTF-16 units: the gate
+// counts characters, and an astral character (emoji, rare script) is one
+// character but two UTF-16 units, so LINE.length would over-count it.
+const CHAR_COUNT = [...LINE].length;
+if (CHAR_COUNT < 1 || CHAR_COUNT > 200 || LINE.trim().length === 0) {
   throw new Error(
-    `Status update must be 1-200 non-whitespace characters, got ${LINE.length}`,
+    `Status update must be 1-200 non-whitespace characters, got ${CHAR_COUNT}`,
   );
 }
 
@@ -27,9 +31,18 @@ if (LINE.includes("\n") || LINE.includes("\r")) {
 // they are not visible in a single read, can break the line's rendering,
 // and could trip the gate's UTF-8/single-line expectations. A status update
 // is printable text only.
+// Also reject invisible format characters (soft hyphen, zero-width space /
+// joiners, bidirectional controls, word joiner, BOM): they are invisible
+// in a single read and could smuggle hidden content into the judged text.
 for (const ch of LINE) {
   const code = ch.codePointAt(0)!;
-  if (code < 0x20 || code === 0x7f) {
+  const isFormat =
+    code === 0x00ad || // soft hyphen
+    (code >= 0x200b && code <= 0x200f) || // zero-width space/joiners, LRM/RLM
+    (code >= 0x202a && code <= 0x202e) || // bidi controls
+    code === 0x2060 || // word joiner
+    code === 0xfeff; // BOM / zero-width no-break space
+  if (code < 0x20 || code === 0x7f || isFormat) {
     throw new Error(
       `Status update contains a control character U+${code.toString(16).toUpperCase().padStart(4, "0")}`,
     );
